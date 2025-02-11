@@ -1,9 +1,13 @@
 [tool.poetry]
-name = "project-name"
+name = "calmmage-service-registry"
 version = "0.0.1"
-description = ""
+description = "Service Registry with FastAPI and Telegram Bot integration"
 authors = ["Petr Lavrov <calmmage@gmail.com>"]
 readme = "README.md"
+
+packages = [
+    { include = "api", from = "." },
+]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<4.0"
@@ -12,6 +16,14 @@ loguru = ">=0.7"
 # for parsing version
 toml = ">=0.10"
 python-dotenv = "*"
+# Main dependencies for the service
+pydantic = ">=2"
+pydantic-settings = ">=2"
+fastapi = "*"
+httpx = "*"
+pymongo = "*"
+motor = "*"
+python-dateutil = ">=2.8"
 
 [tool.poetry.group.extras.dependencies]
 # dependencies for extra features
@@ -72,7 +84,8 @@ python-dotenv = "*"
 
 [tool.poetry.group.test.dependencies]
 pytest = ">=6"
-#pytest-mongodb = "*"
+pytest-asyncio = "*"
+pytest-mongodb = "*"
 
 [tool.poetry.group.docs.dependencies]
 #mkdocs = ">=1.6"
