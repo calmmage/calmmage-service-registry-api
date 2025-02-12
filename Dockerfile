@@ -1,19 +1,24 @@
-FROM python:3.11-slim
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install poetry
-RUN pip install poetry
+RUN pip install --no-cache-dir poetry
 
-# Copy poetry files
-COPY pyproject.toml poetry.lock* ./
-
-# Install dependencies
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-dev --no-interaction --no-ansi
-
-# Copy application code
+# Copy the entire project files
 COPY . .
 
-# Run the application using run.py
-CMD ["poetry", "run", "python", "run.py"] 
+# Configure poetry and install dependencies
+RUN poetry config virtualenvs.create false 
+RUN poetry install --only main,extras
+
+# Copy application code
+COPY app/ .
+
+# Run the bot
+CMD ["poetry", "run", "python", "run.py"]
