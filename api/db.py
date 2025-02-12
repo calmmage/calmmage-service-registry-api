@@ -1,5 +1,6 @@
 from time import time
 from typing import Optional
+from datetime import datetime
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic_settings import BaseSettings
@@ -29,6 +30,6 @@ async def store_heartbeat(service_key: str, metadata: Optional[dict] = None) -> 
     """Store a heartbeat in the database"""
     await heartbeats.insert_one({
         "service_key": service_key,
-        "timestamp": time(),
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "metadata": metadata or {}
     }) 

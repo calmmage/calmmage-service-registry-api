@@ -1,7 +1,7 @@
 What am I doing with this?
 
 - [x] 1) just a /heartbeat (service_key) handle
-  - [ ] make timestamp a readable str
+  - [x] make timestamp a readable str
 - [x] 2) -> write to db
 
 - [x] 3) a sample service that can call this api to register itself every 5 minutes
