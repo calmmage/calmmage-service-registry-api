@@ -3,7 +3,7 @@ import os
 import threading
 import time
 from functools import wraps
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Coroutine
 import httpx
 from loguru import logger
 
@@ -93,22 +93,43 @@ def heartbeat_for_sync(service_key: str, period: int = 300) -> Callable:
     return decorator
 
 
-def heartbeat_for_async(service_key: str, period: int = 300) -> Callable:
-    """Decorator that runs heartbeat as parallel task for async functions"""
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Create heartbeat task
-            heartbeat_task = asyncio.create_task(aheartbeat(service_key, period))
-            logger.info(f"Started heartbeat service for {service_key} in background")
-            
+def run_with_heartbeat(
+    coro: Coroutine,
+    service_key: str,
+    period: int = 300,
+    debug: bool = False
+) -> None:
+    """
+    Run an async function with a heartbeat service.
+    Similar to asyncio.run but adds a heartbeat service.
+    
+    Args:
+        coro: The coroutine to run
+        service_key: Service identifier for heartbeat
+        period: Heartbeat interval in seconds (default: 5 minutes)
+        debug: Enable asyncio debug mode
+    """
+    async def _run_with_heartbeat():
+        # Create heartbeat task
+        heartbeat_task = asyncio.create_task(aheartbeat(service_key, period))
+        logger.info(f"Started heartbeat service for {service_key} in background")
+        
+        try:
+            # Run both the heartbeat and the main coroutine
+            main_task = asyncio.create_task(coro)
+            await asyncio.gather(heartbeat_task, main_task)
+        except asyncio.CancelledError:
+            logger.info("Tasks cancelled")
+            raise
+        finally:
+            # Ensure heartbeat is cancelled when main task ends
+            heartbeat_task.cancel()
             try:
-                # Run both the heartbeat and the main function
-                main_task = asyncio.create_task(func(*args, **kwargs))
-                await asyncio.gather(heartbeat_task, main_task)
+                await heartbeat_task
             except asyncio.CancelledError:
-                logger.info("Tasks cancelled")
-                raise
-            
-        return wrapper
-    return decorator 
+                pass
+
+    try:
+        asyncio.run(_run_with_heartbeat(), debug=debug)
+    except KeyboardInterrupt:
+        logger.info("Shutting down...") 

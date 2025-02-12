@@ -1,6 +1,6 @@
 import asyncio
 from loguru import logger
-from api.utils import heartbeat_for_async
+from api.utils import run_with_heartbeat
 
 
 async def do_work():
@@ -12,9 +12,8 @@ async def do_work():
         await asyncio.sleep(5)
 
 
-@heartbeat_for_async(service_key="example-async-service", period=60)
 async def main():
-    """Main async function that does work while heartbeat runs in parallel"""
+    """Main async function that does work"""
     try:
         await do_work()
     except asyncio.CancelledError:
@@ -22,7 +21,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
+    run_with_heartbeat(
+        main(),
+        service_key="example-async-service",
+        period=60
+    )
