@@ -24,11 +24,15 @@ What am I doing with this?
   - dead: - like a week.
   - if no heartbeat in last 7 days: dead
 
-5) telegram command to get status of all services
+-[x] 5) telegram command to get status of all services
+  - [ ] let's actually split the command into two: - status and status_full 
+  for full: include dead, include additional info
 
 -> calls the api by the specified url of this service to get statuses of all services
 
-6) a scheduled job (daily) to check
+6) a scheduled job (daily) to check status of all services and elevate the ones that require attention
+7) When server goes down - alert the user
+logic is similar to 6 - just a scheduled job every 15 minutes or so. If failed -> writes to user.
 
 ## Workalong
 
@@ -42,4 +46,16 @@ Test manually? how? CURL POST request to http://localhost:8000/heartbeat?service
 
 2 - sample service
 
+```
+Old env file - showcases features
+CHECK_INTERVAL_SECONDS=60
+DAILY_SUMMARY_INTERVAL_SECONDS=86400
+DAILY_SUMMARY_TIME=09:00
+DATABASE_NAME=service_registry
+DEBUG_MODE=False
+MONGODB_URL=mongodb://localhost:27017
+SERVICE_INACTIVE_THRESHOLD_MINUTES=15
 
+TELEGRAM_CHAT_ID=291560340
+TIMEZONE=Europe/Moscow
+```
