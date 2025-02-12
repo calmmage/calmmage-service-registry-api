@@ -20,5 +20,8 @@ RUN poetry install --only main,extras
 # Copy application code
 COPY api/ .
 
-# Run the bot
-CMD ["poetry", "run", "python", "run.py"]
+# Expose the API port
+EXPOSE 8765
+
+# Run the API
+CMD ["poetry", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8765"]
