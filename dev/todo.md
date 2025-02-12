@@ -1,19 +1,19 @@
 
 - [x] 6) a scheduled job (daily) to check status of all services and elevate the ones that require attention
   - [ ] how do i check this actually works? need some dev mode with custom time - very soon. Also - ... 
+
 - [x] 7) When server goes down - alert the user
 logic is similar to 6 - just a scheduled job every 15 minutes or so. If failed -> writes to user.
 - [ ] only alert the user one time - first time the service is down. How do we track that?
-- [ ] for now - add the first service: the bot itself.
+- [x] for now - add the first service: the bot itself.
 
-- [x] 8) launch bot and api on coolify
-9) add / move utils - decorators etc - to calmlib
- - [ ] create calmlib / all.py where we import all the useful utils? or just do it in utils/init.py?
+- [x] 9) add / move utils - decorators etc - to calmlib
+ - [canceled] create calmlib / all.py where we import all the useful utils? or just do it in utils/init.py?
  - [ ] add examples to calmlib? 
  - [ ] ask gpt: "I keep forgetting / getting lost in all the utils. Any suggestions? Here's file tree. I import all the utils to calmlib/utils/init.py"
 
-10)  Send alerts to notification-manager bot, that takes care of my attention - instead of directly to telegram
-11) write and launch notification-manager bot
+- 10) Send alerts to notification-manager bot, that takes care of my attention - instead of directly to telegram
+- 11) write and launch notification-manager bot
 
 ## Workalong
 
@@ -76,3 +76,5 @@ What am I doing with this?
   for full: include dead, include additional info
 
 -> calls the api by the specified url of this service to get statuses of all services
+
+- [x] 8) launch bot and api on coolify
