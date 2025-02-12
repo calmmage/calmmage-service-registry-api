@@ -1,8 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from loguru import logger
 
-from api.models import HeartbeatRequest
-from api.db import store_heartbeat
+from api.models import HeartbeatRequest, ServicesStatusResponse
+from api.db import store_heartbeat, get_all_services_status
 
 app = FastAPI(title="Service Registry API")
 
@@ -18,6 +18,17 @@ async def heartbeat(request: HeartbeatRequest) -> dict:
         return {"status": "ok"}
     except Exception as e:
         logger.exception("Failed to store heartbeat")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/status", response_model=ServicesStatusResponse)
+async def get_status() -> ServicesStatusResponse:
+    """Get status of all registered services"""
+    try:
+        services = await get_all_services_status()
+        return ServicesStatusResponse(services=services)
+    except Exception as e:
+        logger.exception("Failed to get services status")
         raise HTTPException(status_code=500, detail=str(e))
 
 

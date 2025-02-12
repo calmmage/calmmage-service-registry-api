@@ -11,7 +11,7 @@ What am I doing with this?
     - heartbeat_for_sync
     - heartbeat_for_async
 
-4) api handle to get status of all services
+- [x] 4) api handle to get status of all services
   Logic:
   - for each service:
   - check if > than 3-4 historical heartbeats available
