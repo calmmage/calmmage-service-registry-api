@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "calmmage-service-registry"
+name = "calmmage-service-registry-api"
 version = "0.0.1"
-description = "Service Registry with FastAPI and Telegram Bot integration"
-authors = ["Petr Lavrov <calmmage@gmail.com>"]
+description = "Simple service registry API with heartbeat endpoint"
+authors = ["Petr Lavrov <petr.b.lavrov@gmail.com>"]
 readme = "README.md"
 
 packages = [
@@ -20,10 +20,10 @@ python-dotenv = "*"
 pydantic = ">=2"
 pydantic-settings = ">=2"
 fastapi = "*"
+uvicorn = "*"
 httpx = "*"
 pymongo = "*"
 motor = "*"
-python-dateutil = ">=2.8"
 
 [tool.poetry.group.extras.dependencies]
 # dependencies for extra features
