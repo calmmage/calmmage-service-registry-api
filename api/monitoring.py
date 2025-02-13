@@ -12,7 +12,7 @@ from typing import Optional, Dict
 
 from api.db import (
     get_all_services, upsert_service,
-    record_state_transition
+    record_state_transition, get_all_services_status
 )
 from api.models import (
     Service, ServiceStatus, format_datetime, parse_datetime
@@ -102,14 +102,35 @@ async def check_all_services() -> Dict[str, ServiceStatus]:
     Returns a dict of service keys to their new status (only for changed services)."""
     status_changes = {}
     
-    # Get all registered services
+    # Get all registered services and their heartbeat status
     services = await get_all_services()
+    heartbeat_statuses = await get_all_services_status()
     
     for service_key, service in services.items():
         current_status = service.status
+        heartbeat_status = heartbeat_statuses.get(service_key)
         
-        # Compute new status based on service configuration
-        computed_status = compute_status_from_config(service)
+        # Compute new status
+        if service.expected_period:  # Only use config if explicitly set
+            computed_status = compute_status_from_config(service)
+            logger.debug(f"{service_key}: Using configured thresholds. Computed status: {computed_status}")
+        else:
+            # Use median-based detection from heartbeats
+            if not heartbeat_status:
+                computed_status = ServiceStatus.UNKNOWN  # No heartbeats = DOWN
+                logger.debug(f"{service_key}: No heartbeat status found. Using default: {computed_status}")
+            else:
+                last_heartbeat = datetime.fromisoformat(str(heartbeat_status.last_heartbeat))
+                computed_status = compute_status_from_heartbeats(
+                    last_heartbeat,
+                    heartbeat_status.median_interval
+                )
+                logger.debug(
+                    f"{service_key}: Using heartbeat detection. "
+                    f"Last heartbeat: {last_heartbeat}, "
+                    f"Median interval: {heartbeat_status.median_interval}, "
+                    f"Computed status: {computed_status}"
+                )
         
         if computed_status != current_status:
             # Update service status
@@ -125,9 +146,14 @@ async def check_all_services() -> Dict[str, ServiceStatus]:
             if computed_status == ServiceStatus.ALIVE:
                 alert_message = f"Service {service_key} is back online!"
             elif computed_status in [ServiceStatus.DOWN, ServiceStatus.DEAD]:
+                last_seen = (
+                    heartbeat_status.last_heartbeat
+                    if heartbeat_status
+                    else format_datetime(service.updated_at)
+                )
                 alert_message = (
                     f"Service {service_key} is {computed_status.value}. "
-                    f"Last seen: {format_datetime(service.updated_at)}"
+                    f"Last seen: {last_seen}"
                 )
             
             await record_state_transition(
