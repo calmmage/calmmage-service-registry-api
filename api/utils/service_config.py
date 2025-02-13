@@ -3,10 +3,10 @@
 Example:
     ```python
     from api.utils.service_config import add_service
-    
+
     # Configure a cloud service that should ping every 5 minutes
     add_service("my-api", expected_period=300)  # 5 minutes
-    
+
     # Configure a daily job
     add_service(
         "daily-cleanup",
@@ -33,25 +33,25 @@ def get_api_url() -> Optional[str]:
     return url
 
 
-def add_service(
+def setup_service(
     service_key: str,
     service_type: Optional[ServiceType] = None,
     expected_period: Optional[int] = None,
     dead_after: Optional[int] = None,
-    initial_status: Optional[ServiceStatus] = None
+    initial_status: Optional[ServiceStatus] = None,
 ) -> Dict[str, Any]:
     """Configure a service in the registry.
-    
+
     Args:
         service_key: Unique identifier for the service
         service_type: Type of service ("cloud_service" or "local_job")
         expected_period: Time in seconds between expected heartbeats
         dead_after: Time in seconds after which to consider service dead
         initial_status: Initial status to set. If None, status won't be changed
-    
+
     Returns:
         Updated service configuration
-    
+
     Raises:
         httpx.HTTPError: If request fails
         ValueError: If CALMMAGE_SERVICE_REGISTRY_URL is not set
@@ -61,32 +61,28 @@ def add_service(
         raise ValueError("CALMMAGE_SERVICE_REGISTRY_URL not set")
 
     try:
-        # Only include provided parameters
-        params = {}
-        if service_type is not None:
-            params["service_type"] = service_type
-        if expected_period is not None:
-            params["expected_period"] = expected_period
-        if dead_after is not None:
-            params["dead_after"] = dead_after
-        if initial_status is not None:
-            params["status"] = initial_status
+        # Build request body
+        request_data = {
+            "service_key": service_key,
+            "service_type": service_type,
+            "expected_period": expected_period,
+            "dead_after": dead_after,
+        }
+        # Remove None values
+        request_data = {k: v for k, v in request_data.items() if v is not None}
 
-        response = httpx.post(
-            f"{api_url}/test/update-service/{service_key}",
-            params=params
-        )
+        response = httpx.post(f"{api_url}/configure-service", json=request_data)
         response.raise_for_status()
-        service = response.json()["service"]
-        
+        service = response.json()
+
         logger.info(f"Service {service_key} configured successfully")
-        logger.info(f"Type: {service['service_type']}")
+        logger.info(f"Type: {service.get('service_type', 'default')}")
         if service.get("expected_period"):
             logger.info(f"Expected period: {service['expected_period']} seconds")
         if service.get("dead_after"):
             logger.info(f"Dead after: {service['dead_after']} seconds")
-        
+
         return service
     except Exception as e:
         logger.error(f"Failed to configure service {service_key}: {e}")
-        raise 
+        raise

@@ -20,10 +20,7 @@ def parse_datetime(dt_str: str) -> datetime:
 class ServiceType(str, Enum):
     """Type of service being monitored"""
     CLOUD_SERVICE = "cloud_service"  # Long-running cloud service
-    WORKER = "worker"
-    API = "api"
-    BOT = "bot"
-    OTHER = "other"
+    LOCAL_JOB = "local_job"  # Periodic local job that can disappear sometimes
 
 
 class ServiceStatus(str, Enum):

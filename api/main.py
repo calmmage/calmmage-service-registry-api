@@ -1,7 +1,8 @@
 import asyncio
 from fastapi import FastAPI, HTTPException
 from loguru import logger
-from typing import Optional, Dict, List, Set
+from pydantic import BaseModel
+from typing import Optional, Dict, Set
 
 from api.db import (
     get_all_services,
@@ -75,22 +76,26 @@ async def get_status() -> ServicesStatusResponse:
 # Service Configuration
 
 
-@app.post("/services/{service_key}", response_model=Service)
-async def add_service(
-    service_key: str,
-    service_type: Optional[ServiceType] = None,
-    expected_period: Optional[int] = None,
-    dead_after: Optional[int] = None,
-) -> Service:
-    """Configure a service"""
+class ServiceRequest(BaseModel):
+    """Request model for service configuration"""
+
+    service_key: str
+    service_type: Optional[ServiceType] = None
+    expected_period: Optional[int] = None
+    dead_after: Optional[int] = None
+
+
+@app.post("/configure-service")
+async def configure_service(request: ServiceRequest) -> Service:
+    """Configure a service with monitoring parameters"""
     try:
         service = await upsert_service(
-            service_key=service_key,
-            service_type=service_type,
-            expected_period=expected_period,
-            dead_after=dead_after,
+            service_key=request.service_key,
+            service_type=request.service_type,
+            expected_period=request.expected_period,
+            dead_after=request.dead_after,
         )
-        known_services.add(service_key)
+        known_services.add(request.service_key)
         return service
     except Exception as e:
         logger.exception("Failed to configure service")
@@ -110,11 +115,17 @@ async def list_services() -> Dict[str, Service]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/services/{service_key}", response_model=Optional[Service])
-async def get_service_info(service_key: str) -> Optional[Service]:
+class GetServiceRequest(BaseModel):
+    """Request model for getting service info"""
+
+    service_key: str
+
+
+@app.post("/get-service", response_model=Optional[Service])
+async def get_service_info(request: GetServiceRequest) -> Optional[Service]:
     """Get service info by key"""
     try:
-        return await get_service(service_key)
+        return await get_service(request.service_key)
     except Exception as e:
         logger.exception("Failed to get service")
         raise HTTPException(status_code=500, detail=str(e))
@@ -123,36 +134,32 @@ async def get_service_info(service_key: str) -> Optional[Service]:
 # State History
 
 
-@app.get("/state-transitions", response_model=Dict[str, StateTransition])
+class GetStateTransitionsRequest(BaseModel):
+    """Request model for getting state transitions"""
+
+    service_key: Optional[str] = None
+    limit: int = 100
+    only_not_alerted: bool = False
+
+
+@app.post("/state-transitions", response_model=Dict[str, StateTransition])
 async def get_all_services_history(
-    limit: int = 100, only_not_alerted: bool = False
+    request: GetStateTransitionsRequest,
 ) -> Dict[str, StateTransition]:
-    """Get state transition history for all services"""
+    """Get state transition history for all services or a specific service"""
     try:
-        logger.info(
-            f"Getting all services history. Params: limit={limit}, only_not_alerted={only_not_alerted}"
+        logger.info(f"Getting services history. Params: {request}")
+        transitions = await get_state_transitions(
+            service_key=request.service_key,
+            limit=request.limit,
+            only_not_alerted=request.only_not_alerted,
         )
-        transitions = await get_state_transitions(limit=limit, only_not_alerted=only_not_alerted)
         result = transitions or {}
         logger.info(f"Found {len(result)} transitions")
         logger.debug(f"Transitions data: {result}")
         return result
     except Exception as e:
         logger.exception("Failed to get services history")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/services/{service_key}/history", response_model=List[StateTransition])
-async def get_service_history(
-    service_key: str, limit: int = 100, only_not_alerted: bool = False
-) -> List[StateTransition]:
-    """Get state transition history for a service"""
-    try:
-        return await get_state_transitions(
-            service_key=service_key, limit=limit, only_not_alerted=only_not_alerted
-        )
-    except Exception as e:
-        logger.exception("Failed to get service history")
         raise HTTPException(status_code=500, detail=str(e))
 
 
