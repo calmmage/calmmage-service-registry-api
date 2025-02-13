@@ -1,5 +1,6 @@
 import asyncio
 from loguru import logger
+
 from api.utils import run_with_heartbeat
 
 
@@ -24,5 +25,5 @@ if __name__ == "__main__":
     run_with_heartbeat(
         main(),
         service_key="example-async-service",
-        period=60
+        period=5
     )

@@ -1,42 +1,17 @@
-from time import time
-from typing import Optional, Dict, List
 from datetime import datetime, timedelta
-import statistics
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic_settings import BaseSettings
+from typing import Dict, Optional, List
 
-from api.models import ServiceStatus, ServiceStatusResponse
-
-
-def format_timedelta(td: timedelta) -> str:
-    """Format timedelta into human readable string"""
-    total_seconds = int(td.total_seconds())
-    
-    if total_seconds < 60:
-        return f"{total_seconds}s"
-    
-    minutes, seconds = divmod(total_seconds, 60)
-    if minutes < 60:
-        return f"{minutes}m {seconds}s"
-    
-    hours, minutes = divmod(minutes, 60)
-    if hours < 24:
-        return f"{hours}h {minutes}m"
-    
-    days, hours = divmod(hours, 24)
-    if days < 7:
-        return f"{days}d {hours}h"
-    
-    weeks, days = divmod(days, 7)
-    return f"{weeks}w {days}d"
+from api.models import (
+    Service, ServiceType, ServiceStatus, StateTransition,
+    ServiceStatusResponse, format_datetime
+)
 
 
 class Settings(BaseSettings):
-    # MongoDB settings
-    mongodb_url: str
-    mongodb_db_name: str
-
-    # API settings
+    mongodb_url: str = "mongodb://localhost:27017"
+    mongodb_db_name: str = "service_registry"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
@@ -48,107 +23,228 @@ class Settings(BaseSettings):
 settings = Settings()
 client = AsyncIOMotorClient(settings.mongodb_url)
 db = client[settings.mongodb_db_name]
-heartbeats = db["heartbeats"]
 
+
+# Legacy Heartbeat Functions
 
 async def store_heartbeat(service_key: str, metadata: Optional[dict] = None) -> None:
-    """Store a heartbeat in the database"""
-    await heartbeats.insert_one({
+    """Store a service heartbeat"""
+    heartbeat = {
         "service_key": service_key,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "metadata": metadata or {}
-    })
+        "timestamp": format_datetime(datetime.now()),
+        "metadata": metadata
+    }
+    await db.heartbeats.insert_one(heartbeat)
 
 
-async def get_service_status(service_key: str, min_heartbeats: int = 4) -> ServiceStatusResponse:
-    """Get status for a single service based on its heartbeat history"""
-    # Get all heartbeats for the service, ordered by timestamp
-    cursor = heartbeats.find(
-        {"service_key": service_key}
-    ).sort("timestamp", -1)  # newest first
+def _compute_time_since_last_heartbeat(last_heartbeat: datetime) -> tuple[float, str]:
+    """Helper to compute time since last heartbeat"""
+    now = datetime.now()
+    delta = now - last_heartbeat
+    seconds = delta.total_seconds()
     
-    heartbeat_records = await cursor.to_list(length=None)
-    heartbeat_count = len(heartbeat_records)
+    if seconds < 60:
+        readable = f"{int(seconds)} seconds"
+    elif seconds < 3600:
+        minutes = int(seconds / 60)
+        readable = f"{minutes} minutes"
+    elif seconds < 86400:
+        hours = int(seconds / 3600)
+        readable = f"{hours} hours"
+    else:
+        days = int(seconds / 86400)
+        readable = f"{days} days"
     
-    if not heartbeat_count:
-        return ServiceStatusResponse(
-            service_key=service_key,
-            status=ServiceStatus.UNKNOWN,
-            heartbeat_count=0
-        )
-    
-    # Get the last heartbeat info
-    last_heartbeat = heartbeat_records[0]
-    last_timestamp = datetime.strptime(last_heartbeat["timestamp"], "%Y-%m-%d %H:%M:%S")
-    
-    # Calculate time since last heartbeat
-    time_since_last = datetime.now() - last_timestamp
-    time_since_last_seconds = time_since_last.total_seconds()
-    time_since_last_readable = format_timedelta(time_since_last)
-    
-    # Check if service is dead (no heartbeat in 7 days)
-    if time_since_last > timedelta(days=7):
-        return ServiceStatusResponse(
-            service_key=service_key,
-            status=ServiceStatus.DEAD,
-            last_heartbeat=last_heartbeat["timestamp"],
-            time_since_last_heartbeat_seconds=time_since_last_seconds,
-            time_since_last_heartbeat_readable=time_since_last_readable,
-            heartbeat_count=heartbeat_count,
-            metadata=last_heartbeat.get("metadata")
-        )
-    
-    # If we don't have enough heartbeats, return unknown
-    if heartbeat_count < min_heartbeats:
-        return ServiceStatusResponse(
-            service_key=service_key,
-            status=ServiceStatus.UNKNOWN,
-            last_heartbeat=last_heartbeat["timestamp"],
-            time_since_last_heartbeat_seconds=time_since_last_seconds,
-            time_since_last_heartbeat_readable=time_since_last_readable,
-            heartbeat_count=heartbeat_count,
-            metadata=last_heartbeat.get("metadata")
-        )
-    
-    # Calculate intervals between heartbeats
-    intervals = []
-    for i in range(heartbeat_count - 1):
-        current = datetime.strptime(heartbeat_records[i]["timestamp"], "%Y-%m-%d %H:%M:%S")
-        next_beat = datetime.strptime(heartbeat_records[i + 1]["timestamp"], "%Y-%m-%d %H:%M:%S")
-        interval = (current - next_beat).total_seconds()
-        intervals.append(interval)
-    
-    # Calculate median interval
-    median_interval = statistics.median(intervals)
-    
-    # Determine status based on time since last heartbeat
-    status = (
-        ServiceStatus.ALIVE
-        if time_since_last_seconds < 2 * median_interval
-        else ServiceStatus.DOWN
-    )
-    
-    return ServiceStatusResponse(
-        service_key=service_key,
-        status=status,
-        last_heartbeat=last_heartbeat["timestamp"],
-        time_since_last_heartbeat_seconds=time_since_last_seconds,
-        time_since_last_heartbeat_readable=time_since_last_readable,
-        median_interval=median_interval,
-        heartbeat_count=heartbeat_count,
-        metadata=last_heartbeat.get("metadata")
-    )
+    return seconds, readable
 
 
-async def get_all_services_status(min_heartbeats: int = 4) -> Dict[str, ServiceStatusResponse]:
-    """Get status for all services that have ever sent a heartbeat"""
-    # Get unique service keys
-    service_keys = await heartbeats.distinct("service_key")
+async def get_all_services_status() -> Dict[str, ServiceStatusResponse]:
+    """Get status of all services based on heartbeat history"""
+    # Only look at heartbeats from last 7 days
+    cutoff_time = format_datetime(datetime.now() - timedelta(days=7))
     
-    # Get status for each service
+    # Get all unique service keys with recent heartbeats
+    service_keys = set()
+    async for heartbeat in db.heartbeats.find({"timestamp": {"$gte": cutoff_time}}):
+        service_keys.add(heartbeat["service_key"])
+    
+    # Compute status for each service
     services = {}
     for service_key in service_keys:
-        status = await get_service_status(service_key, min_heartbeats)
-        services[service_key] = status
+        # Get recent heartbeats for this service
+        heartbeats = []
+        cursor = db.heartbeats.find({
+            "service_key": service_key,
+            "timestamp": {"$gte": cutoff_time}
+        }).sort("timestamp", -1)
+        async for heartbeat in cursor:
+            heartbeats.append(heartbeat)
+        
+        # Compute status
+        status = ServiceStatus.UNKNOWN
+        last_heartbeat = None
+        time_since_last_heartbeat_seconds = None
+        time_since_last_heartbeat_readable = None
+        median_interval = None
+        metadata = None
+        
+        if heartbeats:
+            # Get last heartbeat info
+            last_heartbeat = datetime.fromisoformat(heartbeats[0]["timestamp"])
+            time_since_last_heartbeat_seconds, time_since_last_heartbeat_readable = (
+                _compute_time_since_last_heartbeat(last_heartbeat)
+            )
+            metadata = heartbeats[0].get("metadata")
+            
+            # Compute status based on heartbeat history
+            if len(heartbeats) >= 4:
+                # Calculate intervals between heartbeats
+                intervals = []
+                for i in range(len(heartbeats) - 1):
+                    current = datetime.fromisoformat(heartbeats[i]["timestamp"])
+                    next_hb = datetime.fromisoformat(heartbeats[i + 1]["timestamp"])
+                    intervals.append((current - next_hb).total_seconds())
+                
+                # Use median interval to determine expected frequency
+                intervals.sort()
+                median_interval = intervals[len(intervals) // 2]
+                
+                # Status based on time since last heartbeat
+                if time_since_last_heartbeat_seconds > 7 * 24 * 3600:  # 7 days
+                    status = ServiceStatus.DEAD
+                elif time_since_last_heartbeat_seconds > 2 * median_interval:
+                    status = ServiceStatus.DOWN
+                else:
+                    status = ServiceStatus.ALIVE
+            else:
+                # Not enough data for median-based detection
+                if time_since_last_heartbeat_seconds > 7 * 24 * 3600:  # 7 days
+                    status = ServiceStatus.DEAD
+                elif time_since_last_heartbeat_seconds > 15 * 60:  # 15 minutes
+                    status = ServiceStatus.DOWN
+                else:
+                    status = ServiceStatus.ALIVE
+        
+        services[service_key] = ServiceStatusResponse(
+            service_key=service_key,
+            status=status,
+            last_heartbeat=last_heartbeat.isoformat() if last_heartbeat else None,
+            time_since_last_heartbeat_seconds=time_since_last_heartbeat_seconds,
+            time_since_last_heartbeat_readable=time_since_last_heartbeat_readable,
+            median_interval=median_interval,
+            heartbeat_count=len(heartbeats),
+            metadata=metadata
+        )
     
-    return services 
+    return services
+
+
+async def cleanup_old_heartbeats(days: int = 30) -> int:
+    """Remove heartbeats older than specified days.
+    Returns number of heartbeats removed."""
+    cutoff_time = format_datetime(datetime.now() - timedelta(days=days))
+    result = await db.heartbeats.delete_many({"timestamp": {"$lt": cutoff_time}})
+    return result.deleted_count
+
+
+# Service Configuration
+
+async def upsert_service(
+    service_key: str,
+    service_type: Optional[ServiceType] = None,
+    expected_period: Optional[int] = None,
+    dead_after: Optional[int] = None,
+    status: Optional[ServiceStatus] = None
+) -> Service:
+    """Configure a service"""
+    update_data = {"service_key": service_key}
+    if service_type is not None:
+        update_data["service_type"] = service_type.value
+    if expected_period is not None:
+        update_data["expected_period"] = str(expected_period)
+    if dead_after is not None:
+        update_data["dead_after"] = str(dead_after)
+    if status is not None:
+        update_data["status"] = status.value
+        update_data["updated_at"] = format_datetime(datetime.now())
+
+    result = await db.services.update_one(
+        {"service_key": service_key},
+        {"$set": update_data},
+        upsert=True
+    )
+
+    if result.upserted_id or result.modified_count > 0:
+        service_data = await db.services.find_one({"service_key": service_key})
+        if not service_data:
+            raise ValueError(f"Failed to retrieve service after upsert: {service_key}")
+        return Service(**service_data)
+    else:
+        raise ValueError(f"Failed to upsert service: {service_key}")
+
+
+async def get_all_services() -> Dict[str, Service]:
+    """Get all configured services"""
+    services = {}
+    async for service_data in db.services.find():
+        service = Service(**service_data)
+        services[service.service_key] = service
+    return services
+
+
+async def get_service(service_key: str) -> Optional[Service]:
+    """Get a service by key"""
+    service_data = await db.services.find_one({"service_key": service_key})
+    return Service(**service_data) if service_data else None
+
+
+# State Transitions
+
+async def record_state_transition(
+    service_key: str,
+    from_state: ServiceStatus,
+    to_state: ServiceStatus,
+    alert_message: Optional[str] = None
+) -> StateTransition:
+    """Record a service state transition"""
+    transition = StateTransition(
+        service_key=service_key,
+        from_state=from_state,
+        to_state=to_state,
+        alert_message=alert_message,
+        timestamp=datetime.now()  # Explicitly set to ensure consistency
+    )
+    
+    # Convert to dict and ensure datetime is formatted correctly
+    transition_data = transition.model_dump()
+    transition_data["timestamp"] = format_datetime(transition.timestamp)
+    
+    await db.state_transitions.insert_one(transition_data)
+    return transition
+
+
+async def get_state_transitions(
+    service_key: Optional[str] = None,
+    limit: int = 100,
+    only_not_alerted: bool = False
+) -> List[StateTransition]:
+    """Get state transitions, optionally filtered by service and alert status"""
+    query = {}
+    if service_key:
+        query["service_key"] = service_key
+    if only_not_alerted:
+        query["alerted"] = False
+
+    transitions = []
+    cursor = db.state_transitions.find(query).sort("timestamp", -1).limit(limit)
+    async for transition_data in cursor:
+        transitions.append(StateTransition(**transition_data))
+    return transitions
+
+
+async def mark_transition_alerted(transition_id: str) -> None:
+    """Mark that user has been alerted about a state transition"""
+    await db.state_transitions.update_one(
+        {"_id": transition_id},
+        {"$set": {"alerted": True}}
+    ) 

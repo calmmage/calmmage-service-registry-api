@@ -1,14 +1,37 @@
-from typing import Optional, Dict
+from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field
+from typing import Optional, Dict
+
+# Constants for datetime handling
+DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"  # ISO format with microseconds
+
+
+def format_datetime(dt: datetime) -> str:
+    """Convert datetime to string in our standard format"""
+    return dt.strftime(DATETIME_FORMAT)
+
+
+def parse_datetime(dt_str: str) -> datetime:
+    """Parse datetime from our standard format"""
+    return datetime.strptime(dt_str, DATETIME_FORMAT)
+
+
+class ServiceType(str, Enum):
+    """Type of service being monitored"""
+    CLOUD_SERVICE = "cloud_service"  # Long-running cloud service
+    WORKER = "worker"
+    API = "api"
+    BOT = "bot"
+    OTHER = "other"
 
 
 class ServiceStatus(str, Enum):
-    """Service status based on heartbeat history"""
+    """Service status based on monitoring"""
     UNKNOWN = "unknown"  # Not enough data (< 4 heartbeats)
-    ALIVE = "alive"     # Recent heartbeat within expected interval
-    DOWN = "down"       # No recent heartbeat, but service history exists
-    DEAD = "dead"       # No heartbeat in over a week
+    ALIVE = "alive"     # Service is responding within expected period
+    DOWN = "down"       # Service is not responding
+    DEAD = "dead"       # Service has been down for too long
 
 
 class HeartbeatRequest(BaseModel):
@@ -31,3 +54,24 @@ class ServiceStatusResponse(BaseModel):
 class ServicesStatusResponse(BaseModel):
     """Status information for all services"""
     services: Dict[str, ServiceStatusResponse]
+
+
+class Service(BaseModel):
+    """Service configuration and current status"""
+    service_key: str
+    service_type: Optional[ServiceType] = None
+    expected_period: Optional[int] = None  # seconds
+    dead_after: Optional[int] = None  # seconds
+    status: ServiceStatus = ServiceStatus.ALIVE
+    updated_at: datetime = Field(default_factory=datetime.now)
+    metadata: Optional[Dict] = None
+
+
+class StateTransition(BaseModel):
+    """Record of service state changes"""
+    service_key: str
+    from_state: ServiceStatus
+    to_state: ServiceStatus
+    timestamp: datetime = Field(default_factory=datetime.now)
+    alerted: bool = False
+    alert_message: Optional[str] = None  # Additional context for the alert

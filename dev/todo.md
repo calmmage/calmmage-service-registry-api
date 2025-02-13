@@ -1,3 +1,26 @@
+# Reworking Service Registry Alert System
+We're reworking the service registry alert system to track state switches rather than just reporting currently down servers. We'll add two new collections: one for aggregated service data (service list with current status) and one for state transitions (historical state changes). The Telegram bot will later consume this data to deliver precise alerts.
+
+## aggregated services
+- [x] create service model in api/models.py (fields: service_key, last_known_status, last_heartbeat, etc)
+- [ ] implement upsert_service() in api/db.py (insert/update record in "services" collection)
+- [ ] add get_all_services() in api/db.py (retrieve aggregated service records)
+
+## state transitions
+- [ ] define state_transition model in api/models.py (fields: service_key, from_state, to_state, timestamp, alert_sent)
+- [ ] implement record_state_transition() in api/db.py (log transition events in "state_transitions" collection)
+
+## monitoring
+- [ ] build monitoring job in api/monitoring.py (compute current status from raw heartbeats)
+- [ ] compare computed status with stored service record; update service and record state transition if changed
+- [ ] schedule monitoring job as a periodic background task
+
+## api integration
+- [ ] add /state-history endpoint in api/main.py (return state transitions)
+- [ ] hook monitoring job into startup event in api/main.py
+
+## verification
+- [ ] ensure heartbeat saving logic remains unchanged
 
 - [x] 6) a scheduled job (daily) to check status of all services and elevate the ones that require attention
   - [ ] how do i check this actually works? need some dev mode with custom time - very soon. Also - ... 
