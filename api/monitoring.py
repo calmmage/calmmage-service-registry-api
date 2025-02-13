@@ -146,16 +146,23 @@ async def check_all_services() -> Dict[str, ServiceStatus]:
                     f"Service {service_key} is {computed_status.value}. " f"Last seen: {last_seen}"
                 )
 
-            await record_state_transition(
+            # Record transition (if alerts are enabled)
+            transition = await record_state_transition(
                 service_key=service_key,
                 from_state=current_status,
                 to_state=computed_status,
                 alert_message=alert_message,
             )
+            if transition:
+                logger.info(
+                    f"Service {service_key} changed status: {current_status} -> {computed_status}"
+                )
+            else:
+                logger.debug(
+                    f"Service {service_key} changed status: {current_status} -> {computed_status} "
+                    "(alerts disabled)"
+                )
 
             status_changes[service_key] = computed_status
-            logger.info(
-                f"Service {service_key} changed status: {current_status} -> {computed_status}"
-            )
 
     return status_changes

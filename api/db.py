@@ -72,6 +72,11 @@ async def get_all_services_status() -> Dict[str, ServiceStatusResponse]:
     # Only look at heartbeats from last 7 days
     cutoff_time = format_datetime(datetime.now() - timedelta(days=7))
 
+    # Get all services configuration
+    services_config = {}
+    async for service in db.services.find():
+        services_config[service["service_key"]] = service
+
     # Get all unique service keys with recent heartbeats
     service_keys = set()
     async for heartbeat in db.heartbeats.find({"timestamp": {"$gte": cutoff_time}}):
@@ -133,8 +138,14 @@ async def get_all_services_status() -> Dict[str, ServiceStatusResponse]:
                 else:
                     status = ServiceStatus.ALIVE
 
+        # Get service group from configuration
+        service_group = None
+        if service_key in services_config:
+            service_group = services_config[service_key].get("service_group")
+
         services[service_key] = ServiceStatusResponse(
             service_key=service_key,
+            service_group=service_group,
             status=status,
             last_heartbeat=last_heartbeat.isoformat() if last_heartbeat else None,
             time_since_last_heartbeat_seconds=time_since_last_heartbeat_seconds,
@@ -161,14 +172,18 @@ async def cleanup_old_heartbeats(days: int = 30) -> int:
 async def upsert_service(
     service_key: str,
     service_type: Optional[ServiceType] = None,
+    service_group: Optional[str] = None,
     expected_period: Optional[int] = None,
     dead_after: Optional[int] = None,
     status: Optional[ServiceStatus] = None,
+    alerts_enabled: Optional[bool] = None,
 ) -> Service:
     """Configure a service"""
     update_data = {"service_key": service_key}
     if service_type is not None:
         update_data["service_type"] = service_type.value
+    if service_group is not None:
+        update_data["service_group"] = service_group
     if expected_period is not None:
         update_data["expected_period"] = str(expected_period)
     if dead_after is not None:
@@ -176,6 +191,8 @@ async def upsert_service(
     if status is not None:
         update_data["status"] = status.value
         update_data["updated_at"] = format_datetime(datetime.now())
+    if alerts_enabled is not None:
+        update_data["alerts_enabled"] = str(alerts_enabled).lower()  # Store as 'true' or 'false'
 
     result = await db.services.update_one(
         {"service_key": service_key}, {"$set": update_data}, upsert=True
@@ -213,8 +230,20 @@ async def record_state_transition(
     from_state: ServiceStatus,
     to_state: ServiceStatus,
     alert_message: Optional[str] = None,
-) -> StateTransition:
-    """Record a service state transition"""
+) -> Optional[StateTransition]:
+    """Record a service state transition.
+
+    Returns:
+        StateTransition if alerts are enabled for the service, None otherwise.
+    """
+    # Check if alerts are enabled for this service
+    service = await get_service(service_key)
+    if not service or not service.alerts_enabled:
+        logger.debug(
+            f"Alerts disabled for service {service_key}, skipping state transition recording"
+        )
+        return None
+
     transition = StateTransition(
         service_key=service_key,
         from_state=from_state,

@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel, Field
-from typing import Optional, Dict
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, Dict, Union
 
 # Constants for datetime handling
 DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"  # ISO format with microseconds
@@ -43,6 +43,7 @@ class MarkAlertedRequest(BaseModel):
 class ServiceStatusResponse(BaseModel):
     """Status information for a single service"""
     service_key: str
+    service_group: Optional[str] = None
     status: ServiceStatus
     last_heartbeat: Optional[str] = None
     time_since_last_heartbeat_seconds: Optional[float] = None
@@ -58,14 +59,36 @@ class ServicesStatusResponse(BaseModel):
 
 
 class Service(BaseModel):
-    """Service configuration and current status"""
+    """Service configuration and current status.
+    
+    Attributes:
+        service_key: Unique identifier for the service
+        service_type: Type of service (cloud_service or local_job)
+        service_group: Group name for organizing related services
+        expected_period: Expected time between heartbeats in seconds
+        dead_after: Time after which to consider service dead in seconds
+        status: Current service status
+        updated_at: Last update timestamp
+        alerts_enabled: Whether to send alerts for state transitions
+        metadata: Additional service metadata
+    """
     service_key: str
     service_type: Optional[ServiceType] = None
+    service_group: Optional[str] = None
     expected_period: Optional[int] = None  # seconds
     dead_after: Optional[int] = None  # seconds
     status: ServiceStatus = ServiceStatus.ALIVE
     updated_at: datetime = Field(default_factory=datetime.now)
+    alerts_enabled: bool = Field(default=True)  # Default to True for backward compatibility
     metadata: Optional[Dict] = None
+
+    @field_validator('alerts_enabled', mode='before')
+    @classmethod
+    def parse_alerts_enabled(cls, value: Union[bool, str]) -> bool:
+        """Convert string representation of boolean to actual boolean"""
+        if isinstance(value, str):
+            return value.lower() == 'true'
+        return bool(value)
 
 
 class StateTransition(BaseModel):
