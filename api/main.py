@@ -171,8 +171,9 @@ async def monitor_services_periodically():
                 logger.info(f"Status changes detected: {status_changes}")
         except Exception as e:
             logger.exception("Error in monitoring task")
-        
-        await asyncio.sleep(60)  # Check every minute
+
+        from api.db import settings
+        await asyncio.sleep(settings.monitoring_interval_seconds)  # Use configured interval
 
 
 @app.on_event("startup")

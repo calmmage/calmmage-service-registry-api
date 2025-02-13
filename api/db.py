@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic_settings import BaseSettings
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
     mongodb_db_name: str = "service_registry"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    monitoring_interval_seconds: int = 60  # How often to check service status
 
     class Config:
         env_file = ".env"
@@ -23,6 +25,8 @@ class Settings(BaseSettings):
 settings = Settings()
 client = AsyncIOMotorClient(settings.mongodb_url)
 db = client[settings.mongodb_db_name]
+
+logger = logging.getLogger(__name__)
 
 
 # Legacy Heartbeat Functions
@@ -219,6 +223,7 @@ async def record_state_transition(
     transition_data = transition.model_dump()
     transition_data["timestamp"] = format_datetime(transition.timestamp)
     
+    logger.debug(f"Recording state transition: {transition_data}")
     await db.state_transitions.insert_one(transition_data)
     return transition
 
@@ -235,10 +240,13 @@ async def get_state_transitions(
     if only_not_alerted:
         query["alerted"] = False
 
+    logger.debug(f"Fetching state transitions with query: {query}")
     transitions = []
     cursor = db.state_transitions.find(query).sort("timestamp", -1).limit(limit)
     async for transition_data in cursor:
+        logger.debug(f"Found transition: {transition_data}")
         transitions.append(StateTransition(**transition_data))
+    logger.debug(f"Retrieved {len(transitions)} transitions")
     return transitions
 
 

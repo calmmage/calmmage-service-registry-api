@@ -4,7 +4,7 @@ from loguru import logger
 from api.utils import heartbeat_for_sync
 
 
-@heartbeat_for_sync(service_key="example-sync-decorator-service", period=5)
+@heartbeat_for_sync(service_key="sync-decorator-service", period=5)
 def main():
     """Main synchronous function that does some work while heartbeat runs in background"""
     try:

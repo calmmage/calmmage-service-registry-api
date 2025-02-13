@@ -12,11 +12,10 @@ from typing import Optional, Dict
 
 from api.db import (
     get_all_services, upsert_service,
-    record_state_transition, get_all_services_status
+    record_state_transition
 )
 from api.models import (
-    Service, ServiceStatus, ServiceStatusResponse,
-    format_datetime, parse_datetime
+    Service, ServiceStatus, format_datetime, parse_datetime
 )
 
 
@@ -98,104 +97,47 @@ def compute_status_from_config(
         return ServiceStatus.ALIVE
 
 
-async def check_service_status(
-    service_key: str,
-    service: Optional[Service] = None,
-    heartbeat_status: Optional[ServiceStatusResponse] = None
-) -> Optional[ServiceStatus]:
-    """Check service status and record state transition if changed.
-    Returns new status if changed, None otherwise."""
+async def check_all_services() -> Dict[str, ServiceStatus]:
+    """Check status of all services and record state transitions.
+    Returns a dict of service keys to their new status (only for changed services)."""
+    status_changes = {}
     
-    # Get current service status (from configured service if exists)
-    current_status = service.status if service else ServiceStatus.ALIVE  # Default to ALIVE for new services
+    # Get all registered services
+    services = await get_all_services()
     
-    # Compute new status
-    if service and (service.expected_period or service.dead_after):
-        # Use configured thresholds
-        computed_status = compute_status_from_config(service)
-    else:
-        # Use median-based detection from heartbeats
-        if heartbeat_status is None:
-            heartbeat_status = (await get_all_services_status()).get(service_key)
+    for service_key, service in services.items():
+        current_status = service.status
         
-        if not heartbeat_status:
-            computed_status = ServiceStatus.ALIVE  # Default to ALIVE for new services
-        else:
-            # heartbeat_status.last_heartbeat is guaranteed to be str when heartbeat_status exists
-            last_heartbeat = datetime.fromisoformat(str(heartbeat_status.last_heartbeat))
-            computed_status = compute_status_from_heartbeats(
-                last_heartbeat,
-                heartbeat_status.median_interval
-            )
-    
-    if computed_status != current_status:
-        # Update service status
-        if service:
+        # Compute new status based on service configuration
+        computed_status = compute_status_from_config(service)
+        
+        if computed_status != current_status:
+            # Update service status
             service.status = computed_status
             service.updated_at = datetime.now()
             await upsert_service(
                 service_key=service_key,
                 status=computed_status
             )
-        else:
-            # Create service with computed status
-            service = await upsert_service(
+            
+            # Record state transition with message
+            alert_message = None
+            if computed_status == ServiceStatus.ALIVE:
+                alert_message = f"Service {service_key} is back online!"
+            elif computed_status in [ServiceStatus.DOWN, ServiceStatus.DEAD]:
+                alert_message = (
+                    f"Service {service_key} is {computed_status.value}. "
+                    f"Last seen: {format_datetime(service.updated_at)}"
+                )
+            
+            await record_state_transition(
                 service_key=service_key,
-                status=computed_status
+                from_state=current_status,
+                to_state=computed_status,
+                alert_message=alert_message
             )
-        
-        # Record state transition
-        alert_message = None
-        if computed_status in [ServiceStatus.DOWN, ServiceStatus.DEAD]:
-            last_seen = (
-                heartbeat_status.last_heartbeat
-                if heartbeat_status
-                else format_datetime(service.updated_at)
-            )
-            alert_message = (
-                f"Service {service_key} is {computed_status.value}. "
-                f"Last seen: {last_seen}"
-            )
-        
-        await record_state_transition(
-            service_key=service_key,
-            from_state=current_status,
-            to_state=computed_status,
-            alert_message=alert_message
-        )
-        
-        return computed_status
-    
-    return None
-
-
-async def check_all_services() -> Dict[str, ServiceStatus]:
-    """Check status of all services and record state transitions.
-    Returns a dict of service keys to their new status (only for changed services)."""
-    status_changes = {}
-    
-    # Get current state
-    services = await get_all_services()
-    heartbeat_statuses = await get_all_services_status()
-    
-    # Check all services (from both sources)
-    all_keys = set(services.keys()) | set(heartbeat_statuses.keys())
-    
-    for service_key in all_keys:
-        service = services.get(service_key)
-        heartbeat_status = heartbeat_statuses.get(service_key)
-        
-        new_status = await check_service_status(
-            service_key,
-            service=service,
-            heartbeat_status=heartbeat_status
-        )
-        
-        if new_status is not None:
-            status_changes[service_key] = new_status
-            logger.info(
-                f"Service {service_key} changed status: "
-                f"{service.status if service else 'UNKNOWN'} -> {new_status}"
-            )
+            
+            status_changes[service_key] = computed_status
+            logger.info(f"Service {service_key} changed status: {current_status} -> {computed_status}")
     
     return status_changes 

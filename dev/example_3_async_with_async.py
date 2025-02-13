@@ -24,6 +24,6 @@ async def main():
 if __name__ == "__main__":
     run_with_heartbeat(
         main(),
-        service_key="example-async-service",
+        service_key="async-service",
         period=5
     )
