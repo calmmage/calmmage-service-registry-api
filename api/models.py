@@ -39,6 +39,10 @@ class HeartbeatRequest(BaseModel):
     metadata: Optional[dict] = None
 
 
+class MarkAlertedRequest(BaseModel):
+    service_key: str = Field(..., description="Service key to mark as alerted")
+
+
 class ServiceStatusResponse(BaseModel):
     """Status information for a single service"""
     service_key: str
@@ -69,9 +73,16 @@ class Service(BaseModel):
 
 class StateTransition(BaseModel):
     """Record of service state changes"""
+    id: str = Field(alias="_id", default=None)  # MongoDB's ObjectId as string
     service_key: str
     from_state: ServiceStatus
     to_state: ServiceStatus
     timestamp: datetime = Field(default_factory=datetime.now)
     alerted: bool = False
     alert_message: Optional[str] = None  # Additional context for the alert
+
+    class Config:
+        json_encoders = {
+            datetime: format_datetime
+        }
+        populate_by_name = True  # Allow both _id and id

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "calmmage-service-registry-api"
-version = "0.0.1"
+version = "0.2.0"
 description = "Simple service registry API with heartbeat endpoint"
 authors = ["Petr Lavrov <petr.b.lavrov@gmail.com>"]
 readme = "README.md"
