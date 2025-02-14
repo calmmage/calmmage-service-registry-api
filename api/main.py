@@ -81,8 +81,11 @@ class ServiceRequest(BaseModel):
 
     service_key: str
     service_type: Optional[ServiceType] = None
+    service_group: Optional[str] = None
     expected_period: Optional[int] = None
     dead_after: Optional[int] = None
+    alerts_enabled: Optional[bool] = None
+    metadata: Optional[Dict] = None
 
 
 @app.post("/configure-service")
@@ -92,8 +95,11 @@ async def configure_service(request: ServiceRequest) -> Service:
         service = await upsert_service(
             service_key=request.service_key,
             service_type=request.service_type,
+            service_group=request.service_group,
             expected_period=request.expected_period,
             dead_after=request.dead_after,
+            alerts_enabled=request.alerts_enabled,
+            metadata=request.metadata,
         )
         known_services.add(request.service_key)
         return service

@@ -177,6 +177,7 @@ async def upsert_service(
     dead_after: Optional[int] = None,
     status: Optional[ServiceStatus] = None,
     alerts_enabled: Optional[bool] = None,
+    metadata: Optional[Dict] = None,
 ) -> Service:
     """Configure a service"""
     update_data = {"service_key": service_key}
@@ -193,6 +194,8 @@ async def upsert_service(
         update_data["updated_at"] = format_datetime(datetime.now())
     if alerts_enabled is not None:
         update_data["alerts_enabled"] = str(alerts_enabled).lower()  # Store as 'true' or 'false'
+    if metadata is not None:
+        update_data["metadata"] = metadata
 
     result = await db.services.update_one(
         {"service_key": service_key}, {"$set": update_data}, upsert=True
