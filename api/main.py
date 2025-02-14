@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from loguru import logger
 from pydantic import BaseModel
@@ -12,6 +13,7 @@ from api.db import (
     get_all_services_status,
     mark_service_transitions_alerted,
     upsert_service,
+    db,
 )
 from api.models import (
     Service,
@@ -21,6 +23,7 @@ from api.models import (
     HeartbeatRequest,
     ServicesStatusResponse,
     MarkAlertedRequest,
+    format_datetime,
 )
 from api.monitoring import check_all_services
 
@@ -48,10 +51,26 @@ async def heartbeat(request: HeartbeatRequest) -> dict:
         # Create service if it doesn't exist
         if request.service_key not in known_services:
             logger.info(f"New service detected: {request.service_key}")
-            await upsert_service(
+            # Generate default display name from service key
+            display_name = request.service_key.replace("-", " ").replace("_", " ").title()
+            # Initialize new service with all default values
+            service = Service(
                 service_key=request.service_key,
-                status=ServiceStatus.ALIVE,  # Set initial status to ALIVE
+                display_name=display_name,
+                status=ServiceStatus.ALIVE,
+                alerts_enabled=True,
+                service_group="default",
+                updated_at=datetime.now(),
             )
+            update_data = service.model_dump()
+            # Convert datetime and enums to MongoDB format
+            if "updated_at" in update_data:
+                update_data["updated_at"] = format_datetime(update_data["updated_at"])
+            if "service_type" in update_data and update_data["service_type"] is not None:
+                update_data["service_type"] = update_data["service_type"].value
+            if "status" in update_data:
+                update_data["status"] = update_data["status"].value
+            await db.services.insert_one(update_data)
             known_services.add(request.service_key)
 
         # Store heartbeat
@@ -85,6 +104,7 @@ class ServiceRequest(BaseModel):
     expected_period: Optional[int] = None
     dead_after: Optional[int] = None
     alerts_enabled: Optional[bool] = None
+    display_name: Optional[str] = None
     metadata: Optional[Dict] = None
 
 
@@ -99,6 +119,7 @@ async def configure_service(request: ServiceRequest) -> Service:
             expected_period=request.expected_period,
             dead_after=request.dead_after,
             alerts_enabled=request.alerts_enabled,
+            display_name=request.display_name,
             metadata=request.metadata,
         )
         known_services.add(request.service_key)

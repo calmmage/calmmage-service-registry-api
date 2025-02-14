@@ -73,9 +73,9 @@ async def get_all_services_status() -> Dict[str, ServiceStatusResponse]:
     cutoff_time = format_datetime(datetime.now() - timedelta(days=7))
 
     # Get all services configuration
-    services_config = {}
-    async for service in db.services.find():
-        services_config[service["service_key"]] = service
+    services = {}
+    async for service_data in db.services.find():
+        services[service_data["service_key"]] = Service(**service_data)
 
     # Get all unique service keys with recent heartbeats
     service_keys = set()
@@ -83,7 +83,7 @@ async def get_all_services_status() -> Dict[str, ServiceStatusResponse]:
         service_keys.add(heartbeat["service_key"])
 
     # Compute status for each service
-    services = {}
+    services_status = {}
     for service_key in service_keys:
         # Get recent heartbeats for this service
         heartbeats = []
@@ -93,13 +93,18 @@ async def get_all_services_status() -> Dict[str, ServiceStatusResponse]:
         async for heartbeat in cursor:
             heartbeats.append(heartbeat)
 
-        # Compute status
-        status = ServiceStatus.UNKNOWN
+        # Get or create service record
+        service = services.get(service_key)
+        if not service:
+            # Create new service with default values if not found
+            service = Service(service_key=service_key)
+            services[service_key] = service
+
+        # Compute time since last heartbeat if we have any
         last_heartbeat = None
         time_since_last_heartbeat_seconds = None
         time_since_last_heartbeat_readable = None
         median_interval = None
-        metadata = None
 
         if heartbeats:
             # Get last heartbeat info
@@ -107,7 +112,6 @@ async def get_all_services_status() -> Dict[str, ServiceStatusResponse]:
             time_since_last_heartbeat_seconds, time_since_last_heartbeat_readable = (
                 _compute_time_since_last_heartbeat(last_heartbeat)
             )
-            metadata = heartbeats[0].get("metadata")
 
             # Compute status based on heartbeat history
             if len(heartbeats) >= 4:
@@ -122,40 +126,16 @@ async def get_all_services_status() -> Dict[str, ServiceStatusResponse]:
                 intervals.sort()
                 median_interval = intervals[len(intervals) // 2]
 
-                # Status based on time since last heartbeat
-                if time_since_last_heartbeat_seconds > 7 * 24 * 3600:  # 7 days
-                    status = ServiceStatus.DEAD
-                elif time_since_last_heartbeat_seconds > 2 * median_interval:
-                    status = ServiceStatus.DOWN
-                else:
-                    status = ServiceStatus.ALIVE
-            else:
-                # Not enough data for median-based detection
-                if time_since_last_heartbeat_seconds > 7 * 24 * 3600:  # 7 days
-                    status = ServiceStatus.DEAD
-                elif time_since_last_heartbeat_seconds > 15 * 60:  # 15 minutes
-                    status = ServiceStatus.DOWN
-                else:
-                    status = ServiceStatus.ALIVE
-
-        # Get service group from configuration
-        service_group = None
-        if service_key in services_config:
-            service_group = services_config[service_key].get("service_group")
-
-        services[service_key] = ServiceStatusResponse(
-            service_key=service_key,
-            service_group=service_group,
-            status=status,
+        services_status[service_key] = ServiceStatusResponse(
+            service=service,
             last_heartbeat=last_heartbeat.isoformat() if last_heartbeat else None,
             time_since_last_heartbeat_seconds=time_since_last_heartbeat_seconds,
             time_since_last_heartbeat_readable=time_since_last_heartbeat_readable,
             median_interval=median_interval,
             heartbeat_count=len(heartbeats),
-            metadata=metadata,
         )
 
-    return services
+    return services_status
 
 
 async def cleanup_old_heartbeats(days: int = 30) -> int:
@@ -177,37 +157,43 @@ async def upsert_service(
     dead_after: Optional[int] = None,
     status: Optional[ServiceStatus] = None,
     alerts_enabled: Optional[bool] = None,
+    display_name: Optional[str] = None,
     metadata: Optional[Dict] = None,
 ) -> Service:
     """Configure a service"""
-    update_data = {"service_key": service_key}
+    # Only include fields that were explicitly provided
+    update_data = {}
+
     if service_type is not None:
-        update_data["service_type"] = service_type.value
+        update_data["service_type"] = service_type.value if service_type else None
     if service_group is not None:
         update_data["service_group"] = service_group
     if expected_period is not None:
-        update_data["expected_period"] = str(expected_period)
+        update_data["expected_period"] = expected_period
     if dead_after is not None:
-        update_data["dead_after"] = str(dead_after)
+        update_data["dead_after"] = dead_after
     if status is not None:
         update_data["status"] = status.value
         update_data["updated_at"] = format_datetime(datetime.now())
     if alerts_enabled is not None:
-        update_data["alerts_enabled"] = str(alerts_enabled).lower()  # Store as 'true' or 'false'
+        update_data["alerts_enabled"] = alerts_enabled
+    if display_name is not None:
+        update_data["display_name"] = display_name
     if metadata is not None:
         update_data["metadata"] = metadata
 
+    # Update in MongoDB
     result = await db.services.update_one(
-        {"service_key": service_key}, {"$set": update_data}, upsert=True
+        {"service_key": service_key}, {"$set": update_data}, upsert=False
     )
 
-    if result.upserted_id or result.modified_count > 0:
+    if result.modified_count > 0:
         service_data = await db.services.find_one({"service_key": service_key})
         if not service_data:
-            raise ValueError(f"Failed to retrieve service after upsert: {service_key}")
+            raise ValueError(f"Failed to retrieve service after update: {service_key}")
         return Service(**service_data)
     else:
-        raise ValueError(f"Failed to upsert service: {service_key}")
+        raise ValueError(f"Failed to update service: {service_key}")
 
 
 async def get_all_services() -> Dict[str, Service]:
